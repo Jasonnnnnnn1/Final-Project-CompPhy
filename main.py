@@ -1,10 +1,23 @@
 import math
 import sys
 import pygame
+import pymunk
 
+# -----------------------------------------------------------------------------
+# How Pymunk works (for your physics project):
+# -----------------------------------------------------------------------------
+# - Space: The "world" where simulation runs. Holds all bodies and shapes.
+#   space.step(dt) advances time by dt (e.g. 1/60 s).
+# - Body: A rigid body with mass, position, velocity. Dynamic bodies move.
+#   body.position, body.velocity are (x, y) in pixels (we use pygame coords).
+# - Shape: Attached to a body; defines collision (e.g. Circle). Has friction
+#   and elasticity (restitution). Collisions are solved automatically.
+# - Static body: space.static_body. Shapes attached to it don't move (e.g. walls).
+# - We use gravity = (0, 0) so balls only move when hit (billiards).
+# -----------------------------------------------------------------------------
 
-# Basic 2D billiards-style simulator in pygame
-# Focus: momentum and kinetic energy conservation in elastic collisions.
+# Basic 2D billiards-style simulator in pygame + pymunk
+# Focus: momentum and kinetic energy; physics handled by pymunk (Chipmunk2D).
 
 WIDTH, HEIGHT = 900, 500
 TABLE_MARGIN = 50
@@ -14,12 +27,12 @@ BG_COLOR = (20, 120, 40)       # table green
 RAIL_COLOR = (10, 60, 20)
 TEXT_COLOR = (240, 240, 240)
 
-# Damping / realism parameters - balanced for good gameplay
-BALL_RESTITUTION = 0.88       # Slight energy loss on ball-ball collisions
-RAIL_RESTITUTION = 0.85       # Rails absorb some energy
-FRICTION_LINEAR = 120.0       # Moderate rolling friction
-FRICTION_QUAD = 0.12          # Speed-dependent drag
-MIN_SPEED_THRESHOLD = 8.0     # Below this speed, ball stops (prevents tiny movements)
+# Pymunk physics parameters
+BALL_ELASTICITY = 0.9         # Ball-ball and ball-rail bounce (0–1)
+BALL_FRICTION = 0.6           # Sliding/rolling friction on cloth
+RAIL_FRICTION = 0.4           # Friction on cushions
+SPACE_DAMPING = 0.4            # Slight velocity damping per second (rolling resistance)
+MIN_SPEED = 15.0               # Below this speed we set velocity to zero
 
 # Simple circular pockets (slightly inset from the rails so balls can reach them)
 POCKET_RADIUS = 26
@@ -34,26 +47,32 @@ POCKET_POSITIONS = [
 
 
 class Ball:
-    def __init__(
-        self,
-        x,
-        y,
-        vx,
-        vy,
-        radius=20,
-        mass=1.0,
-        color=(220, 220, 220),
-        is_cue=False,
-    ):
-        self.x = float(x)
-        self.y = float(y)
-        self.vx = float(vx)
-        self.vy = float(vy)
+    """Ball with physics handled by pymunk. body/shape are None if pocketed."""
+
+    def __init__(self, body, shape, radius, mass, color, is_cue=False):
+        self.body = body
+        self.shape = shape
         self.radius = radius
-        self.mass = float(mass)
+        self.mass = mass
         self.color = color
         self.is_cue = bool(is_cue)
         self.alive = True
+
+    @property
+    def x(self):
+        return self.body.position.x if self.body else 0.0
+
+    @property
+    def y(self):
+        return self.body.position.y if self.body else 0.0
+
+    @property
+    def vx(self):
+        return self.body.velocity.x if self.body else 0.0
+
+    @property
+    def vy(self):
+        return self.body.velocity.y if self.body else 0.0
 
     def position(self):
         return pygame.Vector2(self.x, self.y)
@@ -62,117 +81,67 @@ class Ball:
         return pygame.Vector2(self.vx, self.vy)
 
     def set_velocity(self, v):
-        self.vx, self.vy = float(v.x), float(v.y)
-
-    def update(self, dt):
-        self.x += self.vx * dt
-        self.y += self.vy * dt
+        if self.body:
+            self.body.velocity = (float(v.x), float(v.y))
 
     def draw(self, surface):
-        pygame.draw.circle(surface, self.color, (int(self.x), int(self.y)), self.radius)
+        if self.alive and self.body:
+            pos = self.body.position
+            pygame.draw.circle(surface, self.color, (int(pos.x), int(pos.y)), self.radius)
 
 
-def handle_wall_collisions(ball: Ball):
+def build_physics_space(ball_specs):
+    """
+    Create the pymunk Space with table walls and balls.
+    ball_specs: list of (x, y, radius, mass, color, is_cue).
+    Returns (space, list of Ball).
+    """
+    space = pymunk.Space()
+    space.gravity = (0, 0)
+
+    # Table boundaries (play area)
     left = TABLE_MARGIN
     right = WIDTH - TABLE_MARGIN
     top = TABLE_MARGIN
     bottom = HEIGHT - TABLE_MARGIN
 
-    # Left/right rails
-    if ball.x - ball.radius < left:
-        ball.x = left + ball.radius
-        ball.vx *= -RAIL_RESTITUTION
-    elif ball.x + ball.radius > right:
-        ball.x = right - ball.radius
-        ball.vx *= -RAIL_RESTITUTION
+    # Static walls (rails) - segments so balls bounce off
+    static = space.static_body
+    walls = [
+        pymunk.Segment(static, (left, top), (right, top), 2),      # top
+        pymunk.Segment(static, (right, top), (right, bottom), 2),  # right
+        pymunk.Segment(static, (right, bottom), (left, bottom), 2), # bottom
+        pymunk.Segment(static, (left, bottom), (left, top), 2),      # left
+    ]
+    for seg in walls:
+        seg.elasticity = BALL_ELASTICITY
+        seg.friction = RAIL_FRICTION
+    space.add(*walls)
 
-    # Top/bottom rails
-    if ball.y - ball.radius < top:
-        ball.y = top + ball.radius
-        ball.vy *= -RAIL_RESTITUTION
-    elif ball.y + ball.radius > bottom:
-        ball.y = bottom - ball.radius
-        ball.vy *= -RAIL_RESTITUTION
+    # Balls
+    balls = []
+    for (x, y, radius, mass, color, is_cue) in ball_specs:
+        moment = pymunk.moment_for_circle(mass, 0, radius)
+        body = pymunk.Body(mass, moment)
+        body.position = (x, y)
+        shape = pymunk.Circle(body, radius)
+        shape.elasticity = BALL_ELASTICITY
+        shape.friction = BALL_FRICTION
+        space.add(body, shape)
+        balls.append(Ball(body, shape, radius, mass, color, is_cue))
 
-
-def resolve_ball_collision(b1: Ball, b2: Ball, restitution: float = 1.0):
-    """
-    Resolve an elastic collision between two balls using conservation
-    of momentum and kinetic energy (via impulse method).
-    """
-    p1 = b1.position()
-    p2 = b2.position()
-    v1 = b1.velocity()
-    v2 = b2.velocity()
-
-    n = p1 - p2
-    dist = n.length()
-    min_dist = b1.radius + b2.radius
-
-    if dist == 0:
-        # Avoid division by zero: nudge slightly
-        n = pygame.Vector2(1.0, 0.0)
-        dist = 1.0
-
-    # Check overlap (collision)
-    if dist >= min_dist:
-        return
-
-    # Normal unit vector from 2 to 1
-    n_hat = n / dist
-
-    # Relative velocity along the normal
-    rel_vel = (v1 - v2).dot(n_hat)
-
-    # If balls are separating, don't resolve
-    if rel_vel > 0:
-        return
-
-    m1 = b1.mass
-    m2 = b2.mass
-
-    # Impulse scalar for 1D collision along n_hat
-    j = -(1.0 + restitution) * rel_vel / (1.0 / m1 + 1.0 / m2)
-
-    # Apply impulse
-    v1_post = v1 + (j / m1) * n_hat
-    v2_post = v2 - (j / m2) * n_hat
-
-    b1.set_velocity(v1_post)
-    b2.set_velocity(v2_post)
-
-    # Positional correction: separate the balls so they don't remain overlapped
-    penetration = min_dist - dist
-    if penetration > 0:
-        # Move balls proportional to inverse mass (heavier moves less)
-        total_inv_mass = (1.0 / m1) + (1.0 / m2)
-        if total_inv_mass == 0:
-            return
-        correction = penetration / total_inv_mass
-        b1_shift = correction * (1.0 / m1) * n_hat
-        b2_shift = correction * (1.0 / m2) * -n_hat
-
-        b1.x += b1_shift.x
-        b1.y += b1_shift.y
-        b2.x += b2_shift.x
-        b2.y += b2_shift.y
+    return space, balls
 
 
 def compute_totals(balls):
-    """
-    Compute total linear momentum and kinetic energy of the system.
-    Returns (Px, Py, KE).
-    """
-    Px = 0.0
-    Py = 0.0
-    KE = 0.0
+    """Total linear momentum (Px, Py) and kinetic energy (KE)."""
+    Px = Py = KE = 0.0
     for b in balls:
-        if not b.alive:
+        if not b.alive or not b.body:
             continue
         Px += b.mass * b.vx
         Py += b.mass * b.vy
-        speed2 = b.vx * b.vx + b.vy * b.vy
-        KE += 0.5 * b.mass * speed2
+        KE += 0.5 * b.mass * (b.vx * b.vx + b.vy * b.vy)
     return Px, Py, KE
 
 
@@ -195,282 +164,199 @@ def draw_table(surface):
         pygame.draw.circle(surface, (0, 0, 0), (int(px), int(py)), POCKET_RADIUS)
 
 
-def handle_pocketing(balls):
-    """
-    Mark balls as pocketed (not alive) if they reach any pocket.
-    For now we do not pocket the cue ball, so you can always shoot again.
-    """
+def handle_pocketing(space, balls):
+    """If a ball (non-cue) is inside a pocket, remove it from the simulation."""
     for b in balls:
-        if not b.alive:
+        if not b.alive or not b.body or b.is_cue:
             continue
-        if b.is_cue:
-            continue
+        x, y = b.body.position.x, b.body.position.y
         for (px, py) in POCKET_POSITIONS:
-            dx = b.x - px
-            dy = b.y - py
-            if dx * dx + dy * dy <= POCKET_RADIUS * POCKET_RADIUS:
+            if (x - px) ** 2 + (y - py) ** 2 <= POCKET_RADIUS ** 2:
+                space.remove(b.shape, b.body)
+                b.body = None
+                b.shape = None
                 b.alive = False
-                b.vx = 0.0
-                b.vy = 0.0
                 break
 
 
-def physics_step(balls, dt):
-    # Update positions and handle wall collisions (with friction and damping)
-    for ball in balls:
-        if not ball.alive:
-            continue
-        ball.update(dt)
-        handle_wall_collisions(ball)
-
-        # Apply strong rolling friction - real billiards balls slow down quickly
-        speed = math.hypot(ball.vx, ball.vy)
-        if speed > 0.0:
-            # Very strong deceleration that grows with speed
-            decel = FRICTION_LINEAR + FRICTION_QUAD * speed
-            dv = decel * dt
-            if dv >= speed or speed < MIN_SPEED_THRESHOLD:
-                # Stop the ball if it's moving too slowly (realistic)
-                ball.vx = 0.0
-                ball.vy = 0.0
-            else:
-                scale = (speed - dv) / speed
-                ball.vx *= scale
-                ball.vy *= scale
-
-    # Handle ball-ball collisions (pairwise) - these lose significant energy
-    n_balls = len(balls)
-    for i in range(n_balls):
-        for j in range(i + 1, n_balls):
-            if not balls[i].alive or not balls[j].alive:
-                continue
-            resolve_ball_collision(balls[i], balls[j], restitution=BALL_RESTITUTION)
-
-    # Handle pocketing
-    handle_pocketing(balls)
-
-
-def physics_step_ideal(balls, dt):
-    """
-    Simpler, nearly ideal physics (no friction, perfectly elastic)
-    used only for planning the \"best\" shot in the search.
-    """
-    # Update positions and handle wall collisions (perfectly elastic)
-    left = TABLE_MARGIN
-    right = WIDTH - TABLE_MARGIN
-    top = TABLE_MARGIN
-    bottom = HEIGHT - TABLE_MARGIN
-
-    for ball in balls:
-        if not ball.alive:
-            continue
-        ball.update(dt)
-
-        if ball.x - ball.radius < left:
-            ball.x = left + ball.radius
-            ball.vx *= -1.0
-        elif ball.x + ball.radius > right:
-            ball.x = right - ball.radius
-            ball.vx *= -1.0
-
-        if ball.y - ball.radius < top:
-            ball.y = top + ball.radius
-            ball.vy *= -1.0
-        elif ball.y + ball.radius > bottom:
-            ball.y = bottom - ball.radius
-            ball.vy *= -1.0
-
-    # Handle ball-ball collisions with perfectly elastic response
-    n_balls = len(balls)
-    for i in range(n_balls):
-        for j in range(i + 1, n_balls):
-            if not balls[i].alive or not balls[j].alive:
-                continue
-            resolve_ball_collision(balls[i], balls[j], restitution=1.0)
-
-    # Handle pocketing
-    handle_pocketing(balls)
-
-
-def clone_balls(balls):
-    clones = []
+def physics_step(space, balls, dt):
+    """Advance pymunk simulation, apply damping, then check pocketing."""
+    space.step(dt)
+    # Rolling resistance: slow down velocities a bit each frame
     for b in balls:
-        clone = Ball(
-            x=b.x,
-            y=b.y,
-            vx=b.vx,
-            vy=b.vy,
-            radius=b.radius,
-            mass=b.mass,
-            color=b.color,
-            is_cue=b.is_cue,
-        )
-        clone.alive = b.alive
-        clones.append(clone)
-    return clones
+        if not b.alive or not b.body:
+            continue
+        v = b.body.velocity
+        speed = (v.x ** 2 + v.y ** 2) ** 0.5
+        if speed < MIN_SPEED:
+            b.body.velocity = (0, 0)
+        elif speed > 0:
+            scale = max(0, 1 - SPACE_DAMPING * dt)
+            b.body.velocity = (v.x * scale, v.y * scale)
+    handle_pocketing(space, balls)
+
+
+def duplicate_space_for_prediction(balls, cue_velocity_override=None):
+    """
+    Build a copy of the physics space with same walls and ball positions/velocities.
+    If cue_velocity_override is (vx, vy), the first ball gets that velocity.
+    Returns (space, list of pymunk bodies in same order as balls).
+    """
+    space = pymunk.Space()
+    space.gravity = (0, 0)
+    left, right = TABLE_MARGIN, WIDTH - TABLE_MARGIN
+    top, bottom = TABLE_MARGIN, HEIGHT - TABLE_MARGIN
+    static = space.static_body
+    walls = [
+        pymunk.Segment(static, (left, top), (right, top), 2),
+        pymunk.Segment(static, (right, top), (right, bottom), 2),
+        pymunk.Segment(static, (right, bottom), (left, bottom), 2),
+        pymunk.Segment(static, (left, bottom), (left, top), 2),
+    ]
+    for seg in walls:
+        seg.elasticity = BALL_ELASTICITY
+        seg.friction = RAIL_FRICTION
+    space.add(*walls)
+
+    body_list = []
+    for i, b in enumerate(balls):
+        if not b.alive:
+            body_list.append(None)
+            continue
+        vx, vy = b.vx, b.vy
+        if i == 0 and cue_velocity_override is not None:
+            vx, vy = cue_velocity_override
+        moment = pymunk.moment_for_circle(b.mass, 0, b.radius)
+        body = pymunk.Body(b.mass, moment)
+        body.position = (b.x, b.y)
+        body.velocity = (vx, vy)
+        shape = pymunk.Circle(body, b.radius)
+        shape.elasticity = BALL_ELASTICITY
+        shape.friction = BALL_FRICTION
+        space.add(body, shape)
+        body_list.append(body)
+    return space, body_list
+
+
+def step_prediction_space(space, body_list, balls, dt):
+    """One step of the duplicate space + damping; remove pocketed from space."""
+    space.step(dt)
+    for i, body in enumerate(body_list):
+        if body is None:
+            continue
+        v = body.velocity
+        speed = (v.x ** 2 + v.y ** 2) ** 0.5
+        if speed < MIN_SPEED:
+            body.velocity = (0, 0)
+        else:
+            scale = max(0, 1 - SPACE_DAMPING * dt)
+            body.velocity = (v.x * scale, v.y * scale)
+    # Pocketing: remove body if in pocket (non-cue only)
+    for i, body in enumerate(body_list):
+        if body is None or i == 0:
+            continue
+        x, y = body.position.x, body.position.y
+        for (px, py) in POCKET_POSITIONS:
+            if (x - px) ** 2 + (y - py) ** 2 <= POCKET_RADIUS ** 2:
+                try:
+                    for s in body.shapes:
+                        space.remove(s)
+                    space.remove(body)
+                except Exception:
+                    pass
+                body_list[i] = None
+                break
 
 
 def simulate_shot(balls, cue_index, target_index, angle_deg, speed):
-    """
-    Run a short off-screen simulation for a given shot and
-    return True if the target ball ends up in any pocket.
-    """
-    sim_balls = clone_balls(balls)
-
-    cue = sim_balls[cue_index]
-    if not cue.alive:
-        return False
-
-    theta = math.radians(angle_deg)
-    cue.vx = speed * math.cos(theta)
-    cue.vy = speed * math.sin(theta)
-
-    t_max = 6.0  # seconds (allow a bit more time to reach a pocket)
-    dt = 1.0 / 300.0
-    steps = int(t_max / dt)
-
-    for _ in range(steps):
-        physics_step_ideal(sim_balls, dt)
-        target = sim_balls[target_index]
-        if not target.alive:
-            # Target has been pocketed
+    """Run pymunk simulation for a shot; return True if target is pocketed."""
+    vel = (speed * math.cos(math.radians(angle_deg)), speed * math.sin(math.radians(angle_deg)))
+    space, body_list = duplicate_space_for_prediction(balls, vel)
+    dt = 1.0 / 180.0
+    for _ in range(int(6.0 / dt)):
+        step_prediction_space(space, body_list, balls, dt)
+        if target_index < len(body_list) and body_list[target_index] is None:
             return True
-
     return False
 
 
 def find_shot_to_pot(balls, cue_index=0, target_index=1):
-    """
-    Brute-force search over shot angles to find a direction that
-    pockets the target ball, using the same physics as the main sim.
-    """
-    # Fixed shot speed (you can tune this)
+    """Brute-force search for an angle that pockets the target ball."""
     speed = 500.0
-
-    # Try angles around the full circle, coarse step to keep it fast
-    for angle_deg in range(0, 360, 2):
+    for angle_deg in range(0, 360, 3):
         if simulate_shot(balls, cue_index, target_index, angle_deg, speed):
             return angle_deg, speed
-
     return None, None
 
 
-def predict_trajectory(balls, cue_index, target_pos, shot_speed=400.0, max_steps=200):
+def predict_trajectory(balls, cue_index, target_pos, shot_speed=400.0, max_steps=180):
     """
-    Simulate the cue ball's trajectory when shot toward target_pos.
-    Returns:
-    - cue_trajectory: list of (x, y) positions for cue ball
-    - hit_ball_index: which ball the cue ball hits first (if any)
-    - object_trajectories: dict mapping ball_index -> list of (x, y) positions for object balls after collision
+    Use a duplicate pymunk space to predict cue and object ball paths.
+    Returns (cue_trajectory, hit_ball_index, object_trajectories).
     """
     if cue_index >= len(balls) or not balls[cue_index].alive:
         return [], None, {}
-    
     cue = balls[cue_index]
-    
-    # Calculate shot direction
     dx = target_pos[0] - cue.x
     dy = target_pos[1] - cue.y
     dist = math.hypot(dx, dy)
     if dist < 5.0:
         return [], None, {}
-    
     dir_x = dx / dist
     dir_y = dy / dist
-    
-    # Clone balls for simulation
-    sim_balls = clone_balls(balls)
-    sim_cue = sim_balls[cue_index]
-    sim_cue.vx = dir_x * shot_speed
-    sim_cue.vy = dir_y * shot_speed
-    
-    cue_trajectory = [(int(sim_cue.x), int(sim_cue.y))]
+    vel = (dir_x * shot_speed, dir_y * shot_speed)
+
+    space, body_list = duplicate_space_for_prediction(balls, vel)
+    cue_trajectory = []
     hit_ball_index = None
-    object_trajectories = {}  # Track trajectories of object balls after they're hit
-    dt = 1.0 / 120.0  # Smaller dt for smoother trajectory
-    
+    object_trajectories = {}
+    dt = 1.0 / 90.0
+
     for step in range(max_steps):
-        # Check if cue ball would hit any other ball (first collision only)
-        if hit_ball_index is None:
-            for i, other in enumerate(sim_balls):
-                if i != cue_index and other.alive:
-                    dx_ball = sim_cue.x - other.x
-                    dy_ball = sim_cue.y - other.y
-                    dist_ball = math.hypot(dx_ball, dy_ball)
-                    if dist_ball < sim_cue.radius + other.radius + 2:
-                        hit_ball_index = i
-                        # Start tracking this object ball's trajectory
-                        object_trajectories[i] = [(int(other.x), int(other.y))]
-                        break
-        
-        # Update physics
-        physics_step(sim_balls, dt)
-        
-        # Record cue ball position
-        cue_trajectory.append((int(sim_cue.x), int(sim_cue.y)))
-        
-        # Record object ball positions after collision
-        if hit_ball_index is not None:
-            hit_ball = sim_balls[hit_ball_index]
-            if hit_ball.alive:
-                object_trajectories[hit_ball_index].append((int(hit_ball.x), int(hit_ball.y)))
-        
-        # Stop if cue ball is too slow or stopped
-        speed = math.hypot(sim_cue.vx, sim_cue.vy)
-        if speed < MIN_SPEED_THRESHOLD:
+        if body_list[0] is not None:
+            p = body_list[0].position
+            cue_trajectory.append((int(p.x), int(p.y)))
+        step_prediction_space(space, body_list, balls, dt)
+        if body_list[0] is None:
             break
-    
+        speed = (body_list[0].velocity.x ** 2 + body_list[0].velocity.y ** 2) ** 0.5
+        if speed < MIN_SPEED:
+            break
+        # Detect first contact with another ball
+        if hit_ball_index is None:
+            for i in range(1, len(body_list)):
+                if body_list[i] is not None:
+                    d = (body_list[0].position.x - body_list[i].position.x) ** 2 + (
+                        body_list[0].position.y - body_list[i].position.y
+                    ) ** 2
+                    if d < (balls[0].radius + balls[i].radius + 2) ** 2:
+                        hit_ball_index = i
+                        object_trajectories[i] = [(int(body_list[i].position.x), int(body_list[i].position.y))]
+                        break
+        else:
+            if hit_ball_index < len(body_list) and body_list[hit_ball_index] is not None:
+                p = body_list[hit_ball_index].position
+                object_trajectories[hit_ball_index].append((int(p.x), int(p.y)))
+
     return cue_trajectory, hit_ball_index, object_trajectories
 
 
 def main():
     pygame.init()
-    pygame.display.set_caption("Computational Physics: Billiards & Momentum")
+    pygame.display.set_caption("Computational Physics: Billiards & Momentum (Pymunk)")
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
     clock = pygame.time.Clock()
     font = pygame.font.SysFont("consolas", 18)
 
-    # Setup: cue ball + 3 target balls
-    ball_radius = 15  # Smaller balls
-    balls = [
-        Ball(
-            x=WIDTH * 0.25,
-            y=HEIGHT * 0.5,
-            vx=0.0,
-            vy=0.0,
-            radius=ball_radius,
-            mass=1.0,
-            color=(250, 240, 240),
-            is_cue=True,
-        ),
-        Ball(
-            x=WIDTH * 0.55,
-            y=HEIGHT * 0.45,
-            vx=0.0,
-            vy=0.0,
-            radius=ball_radius,
-            mass=1.0,
-            color=(240, 200, 80),
-        ),
-        Ball(
-            x=WIDTH * 0.55,
-            y=HEIGHT * 0.55,
-            vx=0.0,
-            vy=0.0,
-            radius=ball_radius,
-            mass=1.0,
-            color=(80, 160, 240),
-        ),
-        Ball(
-            x=WIDTH * 0.7,
-            y=HEIGHT * 0.5,
-            vx=0.0,
-            vy=0.0,
-            radius=ball_radius,
-            mass=1.0,
-            color=(200, 100, 150),
-        ),
+    # Ball layout: (x, y, radius, mass, color, is_cue)
+    ball_radius = 15
+    ball_specs = [
+        (WIDTH * 0.25, HEIGHT * 0.5, ball_radius, 1.0, (250, 240, 240), True),
+        (WIDTH * 0.55, HEIGHT * 0.45, ball_radius, 1.0, (240, 200, 80), False),
+        (WIDTH * 0.55, HEIGHT * 0.55, ball_radius, 1.0, (80, 160, 240), False),
+        (WIDTH * 0.7, HEIGHT * 0.5, ball_radius, 1.0, (200, 100, 150), False),
     ]
+    space, balls = build_physics_space(ball_specs)
 
     shot_message = "Move mouse to aim, click to shoot, SPACE for auto-shot"
     shot_power = 400.0  # Adjustable shot power (speed)
@@ -490,22 +376,17 @@ def main():
                 if event.key == pygame.K_ESCAPE:
                     running = False
                 elif event.key == pygame.K_SPACE:
-                    # Auto-compute a decent shot (planner)
                     angle_deg, speed = find_shot_to_pot(balls)
-                    if angle_deg is not None:
-                        cue = balls[0]
+                    if angle_deg is not None and balls[0].body:
                         theta = math.radians(angle_deg)
-                        cue.vx = speed * math.cos(theta)
-                        cue.vy = speed * math.sin(theta)
+                        balls[0].body.velocity = (speed * math.cos(theta), speed * math.sin(theta))
                         shot_message = f"Shot: angle={angle_deg}°, speed={speed:.0f}"
                         aiming = False
                     else:
                         shot_message = "No simple direct shot found"
                 elif event.key == pygame.K_r:
-                    # Simple reset: stop cue ball and re-enable aiming
-                    cue = balls[0]
-                    cue.vx = 0.0
-                    cue.vy = 0.0
+                    if balls[0].body:
+                        balls[0].body.velocity = (0, 0)
                     aiming = True
                     shot_message = "Aiming reset"
                 elif event.key == pygame.K_PLUS or event.key == pygame.K_EQUALS:
@@ -524,25 +405,22 @@ def main():
                     shot_power = max(shot_power - 30.0, MIN_SHOT_POWER)
                 shot_message = f"Shot power: {shot_power:.0f}"
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                # Left-click: shoot cue ball toward mouse with power based on distance
-                cue = balls[0]
-                if not cue.alive:
-                    continue
-                mouse_x, mouse_y = pygame.mouse.get_pos()
-                dx = mouse_x - cue.x
-                dy = mouse_y - cue.y
-                dist = math.hypot(dx, dy)
-                if dist > 5.0:
-                    dir_x = dx / dist
-                    dir_y = dy / dist
-                    # Use the adjustable shot power
-                    cue.vx = dir_x * shot_power
-                    cue.vy = dir_y * shot_power
-                    aiming = False
-                    shot_message = f"Manual shot: speed={shot_power:.0f}"
+                if not balls[0].alive or not balls[0].body:
+                    pass
+                else:
+                    mouse_x, mouse_y = pygame.mouse.get_pos()
+                    dx = mouse_x - balls[0].x
+                    dy = mouse_y - balls[0].y
+                    dist = math.hypot(dx, dy)
+                    if dist > 5.0:
+                        dir_x = dx / dist
+                        dir_y = dy / dist
+                        balls[0].body.velocity = (dir_x * shot_power, dir_y * shot_power)
+                        aiming = False
+                        shot_message = f"Manual shot: speed={shot_power:.0f}"
 
-        # Update physics
-        physics_step(balls, dt)
+        # Update physics (pymunk step + damping + pocketing)
+        physics_step(space, balls, dt)
 
         # Compute totals for display
         Px, Py, KE = compute_totals(balls)
@@ -553,10 +431,10 @@ def main():
             if ball.alive:
                 ball.draw(screen)
 
-        # Draw aiming arrow and trajectory preview from cue ball to mouse when cue is at rest
+        # Draw aiming arrow and trajectory preview when cue is at rest
         cue = balls[0]
-        if aiming and cue.alive:
-            if abs(cue.vx) < 1e-2 and abs(cue.vy) < 1e-2:
+        if aiming and cue.alive and cue.body:
+            if (cue.vx ** 2 + cue.vy ** 2) ** 0.5 < MIN_SPEED:
                 mouse_x, mouse_y = pygame.mouse.get_pos()
                 start = (int(cue.x), int(cue.y))
                 
