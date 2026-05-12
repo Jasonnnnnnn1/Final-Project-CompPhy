@@ -288,7 +288,7 @@ def find_shot_to_pot(balls, cue_index=0, target_index=1):
             return angle_deg, speed
     return None, None
 
-
+'''
 def predict_trajectory(balls, cue_index, target_pos, shot_speed=400.0, max_steps=180):
     """
     Use a duplicate pymunk space to predict cue and object ball paths.
@@ -339,7 +339,7 @@ def predict_trajectory(balls, cue_index, target_pos, shot_speed=400.0, max_steps
                 object_trajectories[hit_ball_index].append((int(p.x), int(p.y)))
 
     return cue_trajectory, hit_ball_index, object_trajectories
-
+'''
 
 def main():
     pygame.init()
@@ -438,6 +438,7 @@ def main():
                 mouse_x, mouse_y = pygame.mouse.get_pos()
                 start = (int(cue.x), int(cue.y))
                 
+                '''
                 # Draw trajectory preview with current shot power
                 cue_trajectory, hit_ball_idx, object_trajectories = predict_trajectory(balls, 0, (mouse_x, mouse_y), shot_power)
                 
@@ -494,6 +495,7 @@ def main():
                             pygame.draw.circle(screen, (255, 200, 0), 
                                              (int(hit_ball.x), int(hit_ball.y)), 
                                              hit_ball.radius + 5, 3)
+                '''
                 
                 # Draw aiming arrow
                 end_vec = pygame.Vector2(mouse_x - cue.x, mouse_y - cue.y)
