@@ -3,7 +3,7 @@ import constants as c
 
 class PowerBar:
     def __init__(self):
-        self.force = 1500 # Initially set the power bar value in the middle
+        self.force = c.INIT_FORCE # Initially set the power bar value in the middle
         self.min_f = c.MIN_FORCE
         self.max_f = c.MAX_FORCE
 

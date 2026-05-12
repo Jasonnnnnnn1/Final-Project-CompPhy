@@ -90,7 +90,7 @@ class Ball:
             return
         
         # Frictional force acting on the ball
-        friction_force = friction_coeff * self.mass * 9.81  # KEY EQUATION: f = μ * m * g
+        friction_force = friction_coeff * self.mass * c.GRAVITY  # KEY EQUATION: f = μ * m * g
 
         # Calculating the unit positional component by dividing the velocity of each component by its speed
         # Then adding a minus sign since this is a decrease in velocity

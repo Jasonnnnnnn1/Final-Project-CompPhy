@@ -29,8 +29,14 @@ CUSHION_WIDTH        = int(5.1 * SCALE)
 # Ball mass in KG
 BALL_MASS = 0.16
 
+# TODO: Still need rework on the unit conversions
 '''Physics'''
 MIN_FORCE = 1
-MAX_FORCE = 3000
-BALL_FRICTION = 1.7
-CUSHION_RESTITUTION = 0.81  # Coefficient of restitution for ball-cushion collision (energy loss)
+MAX_FORCE = 5000
+INIT_FORCE = 2500
+BALL_FRICTION = 0.01
+CUSHION_RESTITUTION = 0.92  # Coefficient of restitution for ball-cushion collision (energy loss)
+
+# Gravity 9.81 m/s^2 = 981 cm/s^2
+# Then we times that with the scale
+GRAVITY = 981 * SCALE
