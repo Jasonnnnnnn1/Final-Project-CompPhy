@@ -1,59 +1,69 @@
 import pygame
 import math
+import constants as c
 
-MIN_FORCE = 1
-MAX_FORCE = 3000
 
 class Ball:
-    def __init__(self, body, shape, radius, mass, color, is_cue=False):
-        self.body = body
-        self.shape = shape
-        self.radius = radius
-        self.mass = mass
+    def __init__(self, x, y, radius, mass, color, is_cue=False):
+        self.position = pygame.Vector2(x, y)
+        self.velocity = pygame.Vector2(0, 0)
+        self.radius = float(radius)
+        self.mass = float(mass)
         self.color = color
         self.is_cue = is_cue
-        self.alive = True # Ball is not pocketed
+        self.alive = True
+        self.shape = {
+            "type": "circle",
+            "radius": self.radius,
+            "center": self.position,
+        }
 
-    # Position components
+    # Get position components
     @property
     def x(self):
-        return self.body.position.x if self.body else 0.0
+        return self.position.x
+
+    @x.setter
+    def x(self, v):
+        self.position.x = float(v)
+        self.shape["center"] = self.position
+
     @property
     def y(self):
-        return self.body.position.y if self.body else 0.0
-    
-    # Velocity components
+        return self.position.y
+
+    @y.setter
+    def y(self, v):
+        self.position.y = float(v)
+        self.shape["center"] = self.position
+
+    # Get velocity components
     @property
     def vx(self):
-        return self.body.velocity.x if self.body else 0.0
+        return self.velocity.x
+
+    @vx.setter
+    def vx(self, v):
+        self.velocity.x = float(v)
+
     @property
     def vy(self):
-        return self.body.velocity.y if self.body else 0.0
+        return self.velocity.y
 
-    # Get position method
-    @property
-    def position(self):
-        return pygame.Vector2(self.x, self.y)
-
-    # Get velocity method
-    @property
-    def velocity(self):
-        return pygame.Vector2(self.vx, self.vy)
-    
+    @vy.setter
+    def vy(self, v):
+        self.velocity.y = float(v)
     # Get the speed of the ball (hypotenuse of both velocity components)
     @property
     def speed(self):
-        return math.hypot(self.vx, self.vy)
+        return math.hypot(self.velocity.x, self.velocity.y)
 
     # Applying the force to the ball object
     def apply_force(self, force, direction: pygame.Vector2, dt=1/60.0):
-        if not self.body:
-            return
-        
-        # Set the force to the very max or the very min even if the user keeps on adding on it (surpassing the bar)
-        force = max(MIN_FORCE, min(MIN_FORCE, force))
+        # Set the force to the very max or the very min even if the user keeps on adding on it
+        force = max(c.MIN_FORCE, min(c.MAX_FORCE, force))
 
-        impulse = force * dt
+        impulse = force * dt  # KEY EQUATION: J = F * dt
 
         # Normalizing the direction to get the unit vectors
         length = math.hypot(direction.x, direction.y)
@@ -63,48 +73,60 @@ class Ball:
         ux = direction.x / length
         uy = direction.y / length
 
-        # Calculate the new velocity components from the impulse
-        new_vx = self.vx + (impulse * ux) / self.mass
-        new_vy = self.vy + (impulse * uy) / self.mass
-        self.body.velocity = new_vx, new_vy
+        # Calculate the new velocity components from the impulse force, KEY EQUATION: v = J/m
+        new_vx = self.velocity.x + (impulse * ux) / self.mass
+        new_vy = self.velocity.y + (impulse * uy) / self.mass
+        self.velocity = pygame.Vector2(new_vx, new_vy)
 
     # Apply friction to the ball for every frame
+    # The semi-implicit euler method is implemented in this function
     def apply_friction(self, friction_coeff, dt=1/60.0):
-        if not self.body or not self.alive:
+        if not self.alive:
             return
         
         # Stop the ball if the speed is already very very very low
         if self.speed < 0.5:
-            self.body.velocity = (0, 0)
+            self.velocity = pygame.Vector2(0, 0)
             return
         
-        # Frictional force acting on the ball = μ * m * g
-        friction_force = friction_coeff * self.mass * 9.81
+        # Frictional force acting on the ball
+        friction_force = friction_coeff * self.mass * 9.81  # KEY EQUATION: f = μ * m * g
 
-        # Direction opposing motion
-        ux = -self.vx / self.speed
-        uy = -self.vy / self.speed
+        # Calculating the unit positional component by dividing the velocity of each component by its speed
+        # Then adding a minus sign since this is a decrease in velocity
+        ux = -self.velocity.x / self.speed
+        uy = -self.velocity.y / self.speed
 
+        # Finding the acceleration of the ball object 
+        # KEY EQUATION: a = f/m (where f is the frictional force transformed by each component, and m is mass of the object)
         ax = (friction_force * ux) / self.mass
         ay = (friction_force * uy) / self.mass
 
-        # Semi-implicit: velocity first
-        new_vx = self.vx + ax * dt
-        new_vy = self.vy + ay * dt
+        # Calculating the new/predicted velocity first 
+        # KEY EQUATION: v(n+1) = v(n) + a*dt
+        new_vx = self.velocity.x + ax * dt
+        new_vy = self.velocity.y + ay * dt
 
-        # Clamp — friction shouldn't reverse the ball
-        if (new_vx * self.vx < 0): new_vx = 0
-        if (new_vy * self.vy < 0): new_vy = 0
+        # Stop the frictional force in rolling the ball backwards
+        if (new_vx * self.velocity.x < 0): new_vx = 0
+        if (new_vy * self.velocity.y < 0): new_vy = 0
 
-        # Position uses new velocity
-        new_x = self.x + new_vx * dt
-        new_y = self.y + new_vy * dt
+        # SEMI-IMPLICIT Euler method: uses the just computed velocity to calculate the position of the ball
+        # KEY EQUATION: r(n+1) = r(n) + v(n+1)*dt
+        new_x = self.position.x + new_vx * dt
+        new_y = self.position.y + new_vy * dt
 
-        self.body.velocity = (new_vx, new_vy)
-        self.body.position = (new_x,  new_y)
+        # Update both the velocity and position vectors
+        self.velocity = pygame.Vector2(new_vx, new_vy)
+        self.position = pygame.Vector2(new_x, new_y)
+        self.shape["center"] = self.position
 
-    # Draw the ball in the coressponding position
+    def update(self, dt):
+        if not self.alive:
+            return
+        self.apply_friction(c.BALL_FRICTION, dt)
+
+    # Draw the ball in its corresponding position
     def draw(self, surface):
-        if self.alive and self.body:
-            pos = self.body.position
-            pygame.draw.circle(surface, self.color, (int(pos.x), int(pos.y)), self.radius)
+        if self.alive:
+            pygame.draw.circle(surface, self.color, (int(self.position.x), int(self.position.y)), int(self.radius))
