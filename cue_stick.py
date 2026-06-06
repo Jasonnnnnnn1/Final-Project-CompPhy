@@ -1,6 +1,7 @@
-from power_bar import PowerBar
 import math
 import pygame
+import constants as c
+from power_bar import PowerBar
 class CueStick:
     def __init__(self, cue_ball):
         self.cue_ball = cue_ball

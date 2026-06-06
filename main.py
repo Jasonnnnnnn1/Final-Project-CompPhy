@@ -6,67 +6,84 @@ from cue_stick import CueStick
 from collisions import resolve_ball_collisions
 from ghost_ball import draw_ghost_indicator, get_ghost_aim
 
-# Saved layout used by the R-key restart
-INITIAL_LAYOUT = [
-    {"x": 400, "y": 300, "color": (240, 240, 240), "is_cue": True},
-    {"x": 700, "y": 300, "color": (230, 30, 30)},
-    {"x": 730, "y": 285, "color": (240, 200, 30)},
-    {"x": 730, "y": 315, "color": (40, 100, 220)},
-    {"x": 760, "y": 300, "color": (130, 40, 170)},
-    {"x": 760, "y": 330, "color": (20, 150, 80)},
-]
-
-
 def create_balls(layout):
     balls = []
     for spec in layout:
         balls.append(
             Ball(
-                spec["x"],
-                spec["y"],
-                c.BALL_RADIUS,
-                c.BALL_MASS,
-                spec["color"],
+                x_px=spec["x"],             
+                y_px=spec["y"],             
+                radius_m=c.BALL_RADIUS_M,   
+                mass=c.BALL_MASS,
+                color=spec["color"],
                 is_cue=spec.get("is_cue", False),
+                is_black=spec.get("is_black", False),
+                image_path=spec.get("img", None) 
             )
         )
     return balls
 
 
 def reset_game(balls, cue_stick, layout):
+    # Reset all ball physics properties safely
     for ball, spec in zip(balls, layout):
         ball.alive = True
-        ball.x = spec["x"]
+        ball.x = spec["x"] 
         ball.y = spec["y"]
         ball.velocity = pygame.Vector2(0, 0)
+        ball.angular_velocity = 0.0
+        
+    # Reset the cue stick object states completely
     cue_stick.active = True
+    if hasattr(cue_stick, 'is_shooting'):
+        cue_stick.is_shooting = False  # Clear any active hit animations
+    
+    # Reset the power bar settings
     cue_stick.power_bar.force = c.INIT_FORCE
 
 
 def resolve_wall_collisions(balls, table):
+    # Establish the explicit boundary lines of the cushions in pixels
+    # This prevents calculations from drifting if constants are updated
+    cushion_top    = table.top + c.RAIL_W
+    cushion_bottom = table.bottom - c.RAIL_W
+    cushion_left   = table.left + c.RAIL_W
+    cushion_right  = table.right - c.RAIL_W
+
     for ball in balls:
         if not ball.alive:
             continue
 
-        if ball.y - ball.radius < table.top + c.RAIL_W:
+        radius = ball.radius_px
+
+        # --- TOP CUSHION ---
+        if ball.y - radius < cushion_top:
             if not table.is_top_cushion_open(ball):
-                ball.y = table.top + c.RAIL_W + ball.radius
-                ball.vy *= -c.CUSHION_RESTITUTION
+                # Ensure the ball is heading TOWARDS the cushion before bouncing
+                if ball.vy < 0:
+                    ball.y = cushion_top + radius
+                    ball.vy *= -c.CUSHION_RESTITUTION
 
-        if ball.y + ball.radius > table.bottom - c.RAIL_W:
+        # --- BOTTOM CUSHION ---
+        elif ball.y + radius > cushion_bottom:
             if not table.is_bottom_cushion_open(ball):
-                ball.y = table.bottom - c.RAIL_W - ball.radius
-                ball.vy *= -c.CUSHION_RESTITUTION
+                if ball.vy > 0:
+                    ball.y = cushion_bottom - radius
+                    ball.vy *= -c.CUSHION_RESTITUTION
 
-        if ball.x - ball.radius < table.left + c.RAIL_W:
+        # --- LEFT CUSHION ---
+        if ball.x - radius < cushion_left:
             if not table.is_left_cushion_open(ball):
-                ball.x = table.left + c.RAIL_W + ball.radius
-                ball.vx *= -c.CUSHION_RESTITUTION
+                if ball.vx < 0:
+                    ball.x = cushion_left + radius
+                    ball.vx *= -c.CUSHION_RESTITUTION
 
-        if ball.x + ball.radius > table.right - c.RAIL_W:
+        # --- RIGHT CUSHION ---
+        elif ball.x + radius > cushion_right:
             if not table.is_right_cushion_open(ball):
-                ball.x = table.right - c.RAIL_W - ball.radius
-                ball.vx *= -c.CUSHION_RESTITUTION
+                if ball.vx > 0:
+                    ball.x = cushion_right - radius
+                    ball.vx *= -c.CUSHION_RESTITUTION
 
 
 def main():
@@ -76,8 +93,9 @@ def main():
     clock = pygame.time.Clock()
 
     table = Table()
-    balls = create_balls(INITIAL_LAYOUT)
+    balls = create_balls(c.INITIAL_LAYOUT)
     cue_ball = balls[0]
+    black_ball = balls[5]
     cue_stick = CueStick(cue_ball)
 
     running = True
@@ -98,7 +116,7 @@ def main():
                 if event.key == pygame.K_DOWN:
                     cue_stick.power_bar.decrease()
                 if event.key == pygame.K_r:
-                    reset_game(balls, cue_stick, INITIAL_LAYOUT)
+                    reset_game(balls, cue_stick, c.INITIAL_LAYOUT)
 
         mouse_pos = pygame.mouse.get_pos()
         cue_stick.update(mouse_pos)
@@ -109,11 +127,28 @@ def main():
         resolve_ball_collisions(balls)
         resolve_wall_collisions(balls, table)
 
-        all_stopped = all(not b.alive or b.speed < 0.5 for b in balls)
-        if all_stopped:
-            cue_stick.active = True
-
         table.check_pockets(balls)
+
+        all_stopped = all(not b.alive or b.speed < 0.001 for b in balls)
+        if all_stopped:
+            # Check if the black ball is pocketed
+            if not black_ball.alive:
+                print("8-Ball is IN!")
+                reset_game(balls, cue_stick, c.INITIAL_LAYOUT)
+            # Check if the cue ball is pocketed
+            if not cue_ball.alive:
+                print("Respawning cue ball!")
+                # Dynamic calculations matching table layout metrics
+                playable_length = table.play_right - table.play_left
+                center_y = table.play_top + (table.play_bottom - table.play_top) // 2
+                cue_ball.x = table.play_left + int(playable_length * 0.25)
+                cue_ball.y = center_y
+                cue_ball.velocity = pygame.Vector2(0, 0)
+                cue_ball.angular_velocity = 0.0
+                cue_ball.alive = True
+            
+            # Bring cue stick back
+            cue_stick.active = True
 
         screen.fill((15, 20, 25))
         table.draw(screen)

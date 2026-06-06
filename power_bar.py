@@ -13,11 +13,11 @@ class PowerBar:
         # Used to map force to a heatmap color and bar fill height
         return (self.force - self.min_f) / (self.max_f - self.min_f)
 
-    def increase(self, amount=100):
+    def increase(self, amount=50.0):
         # Increases force by amount, clamped to max force
         self.force = min(self.max_f, self.force + amount)
 
-    def decrease(self, amount=100):
+    def decrease(self, amount=50.0):
         # Decreases force by amount, clamped to min force
         self.force = max(self.min_f, self.force - amount)
 
@@ -26,7 +26,7 @@ class PowerBar:
         # my is the mouse y position, mapped to force range
         rel = my - bar_top
         t = 1.0 - max(0.0, min(1.0, rel / bar_height))
-        self.force = int(self.min_f + t * (self.max_f - self.min_f))
+        self.force = self.min_f + t * (self.max_f - self.min_f)
 
     def heat_color(self):
         # Returns an RGB color based on current force level
@@ -49,7 +49,7 @@ class PowerBar:
     def draw(self, surface, x, y, width, height):
         # Draws the heatmap power bar at the given position and size
         # Fills from bottom up based on current force level
-        # Also draws + and - buttons and the force readout in Newtons
+        # Also draws + and - buttons and the force readout
 
         btn_h   = 30   # Height of + and - buttons
         bar_rec = pygame.Rect(x, y + btn_h + 8, width, height)
@@ -86,7 +86,7 @@ class PowerBar:
 
         # Force readout in Newtons below the minus button
         font  = pygame.font.SysFont("monospace", 14)
-        f_txt = font.render(f"{self.force} N", True, self.heat_color())
+        f_txt = font.render(f"{self.force:.0f} N", True, self.heat_color())
         surface.blit(f_txt, (x, btn_minus.bottom + 8))
 
     def _color_at(self, t):

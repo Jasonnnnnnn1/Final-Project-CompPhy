@@ -1,44 +1,57 @@
 import pygame
-import math
 import constants as c
 
-
 class Ball:
-    def __init__(self, x, y, radius, mass, color, is_cue=False):
-        self.position = pygame.Vector2(x, y)
-        self.velocity = pygame.Vector2(0, 0)
-        self.radius = float(radius)
-        self.mass = float(mass)
+    def __init__(self, x_px, y_px, radius_m, mass, color, is_cue=False, is_black=False, image_path=None):
+        # 1. Initialize the internal vector position FIRST (converts incoming pixels to meters)
+        self.position = pygame.Vector2(x_px * c.M_PER_PX, y_px * c.M_PER_PX)
+        
+        # 2. Assign standard physics constants (all calculations run natively in meters)
+        self.radius = radius_m            # Physics radius (meters)
+        self.mass = mass
         self.color = color
         self.is_cue = is_cue
+        self.is_black = is_black
         self.alive = True
-        self.shape = {
-            "type": "circle",
-            "radius": self.radius,
-            "center": self.position,
-        }
+        self.velocity = pygame.Vector2(0, 0)
+        self.angular_velocity = 0.0
+
+        # Image asset handling on the balls
+        self.image = None
+        if image_path:
+            raw_image = pygame.image.load(image_path).convert_alpha()
+            
+            # Scale it perfectly to match the diameter (width and height = radius * 2)
+            diameter = self.radius_px * 2
+            self.image = pygame.transform.smoothscale(raw_image, (diameter, diameter))
+
+    # --- SYNCHRONIZED PIXEL PROPERTIES ---
+    @property
+    def radius_px(self):
+        """Dynamic converter mapping radius meters to current runtime screen scale pixels."""
+        return int(self.radius * c.PX_PER_M)
 
     @property
     def x(self):
-        return self.position.x
+        """Exposes physics position x in pixel coordinates for drawing and grid mapping."""
+        return self.position.x * c.PX_PER_M
 
     @x.setter
-    def x(self, v):
-        self.position.x = float(v)
-        self.shape["center"] = self.position
+    def x(self, px_val):
+        self.position.x = px_val * c.M_PER_PX
 
     @property
     def y(self):
-        return self.position.y
+        """Exposes physics position y in pixel coordinates for drawing and grid mapping."""
+        return self.position.y * c.PX_PER_M
 
     @y.setter
-    def y(self, v):
-        self.position.y = float(v)
-        self.shape["center"] = self.position
+    def y(self, px_val):
+        self.position.y = px_val * c.M_PER_PX
 
     @property
     def vx(self):
-        return self.velocity.x
+        return self.velocity.x    
 
     @vx.setter
     def vx(self, v):
@@ -54,57 +67,98 @@ class Ball:
 
     @property
     def speed(self):
-        return math.hypot(self.velocity.x, self.velocity.y)
+        return self.velocity.length() # Utilizes Pygame's optimized vector length calculation
 
-    def apply_force(self, force, direction: pygame.Vector2, dt=1/60.0):
+    @property
+    def rolling_speed(self):
+        return abs(self.angular_velocity) * self.radius        
+
+    def is_sliding(self):
+        return abs(self.speed - self.rolling_speed) > 0.05    
+
+    def apply_force(self, force, direction: pygame.Vector2):
         force = max(c.MIN_FORCE, min(c.MAX_FORCE, force))
+        impulse = force * c.CUE_CONTACT_TIME_S  
 
-        impulse = force * dt
-
-        length = math.hypot(direction.x, direction.y)
-        if length == 0:
+        if direction.length_squared() == 0:
             return
-        ux = direction.x / length
-        uy = direction.y / length
+        unit_dir = direction.normalize()
 
-        new_vx = self.velocity.x + (impulse * ux) / self.mass
-        new_vy = self.velocity.y + (impulse * uy) / self.mass
-        self.velocity = pygame.Vector2(new_vx, new_vy)
+        delta_v = impulse / self.mass              
+        self.velocity += delta_v * unit_dir
+        self.angular_velocity = 0.0
 
-    def apply_friction(self, friction_coeff, dt=1/60.0):
-        if not self.alive:
-            return
-
-        if self.speed < 0.5:
+    def apply_sliding_friction(self, friction_coeff, dt):
+        if self.speed < 0.001:                      
             self.velocity = pygame.Vector2(0, 0)
+            self.angular_velocity = 0.0
             return
 
-        friction_force = friction_coeff * self.mass * c.GRAVITY
+        # Calculate deceleration magnitude
+        decel = friction_coeff * c.GRAVITY_MPS2
+        velocity_loss = decel * dt
+        if velocity_loss >= self.speed:
+            # Move the ball by its remaining fractional distance before stopping
+            # Average velocity over the short time fraction = speed / 2
+            time_to_stop = self.speed / decel
+            self.position += (self.velocity * 0.5) * time_to_stop
+            self.velocity = pygame.Vector2(0, 0)
+            self.angular_velocity = self.speed / self.radius # sets final expected spin
+            return
 
-        ux = -self.velocity.x / self.speed
-        uy = -self.velocity.y / self.speed
+        unit_vel = self.velocity.normalize()
+        self.velocity -= decel * unit_vel * dt
 
-        ax = (friction_force * ux) / self.mass
-        ay = (friction_force * uy) / self.mass
+        # Update spin spin_accel
+        desired_spin = self.speed / self.radius
+        spin_accel = (5.0 / 2.0) * decel / self.radius
+        self.angular_velocity = min(self.angular_velocity + spin_accel * dt, desired_spin)
 
-        new_vx = self.velocity.x + ax * dt
-        new_vy = self.velocity.y + ay * dt
+        self.position += self.velocity * dt            
 
-        if (new_vx * self.velocity.x < 0): new_vx = 0
-        if (new_vy * self.velocity.y < 0): new_vy = 0
+    def apply_rolling_friction(self, friction_coeff, dt):
+        # Stop the ball if speed less than 0.001
+        if self.speed < 0.001:
+            self.velocity = pygame.Vector2(0, 0)
+            self.angular_velocity = 0.0
+            return
 
-        new_x = self.position.x + new_vx * dt
-        new_y = self.position.y + new_vy * dt
+        # Friction logic
+        decel = friction_coeff * c.GRAVITY_MPS2   
+        velocity_loss = decel * dt
+        if velocity_loss >= self.speed:
+            time_to_stop = self.speed / decel
+            self.position += (self.velocity * 0.5) * time_to_stop
+            self.velocity = pygame.Vector2(0, 0)
+            self.angular_velocity = 0.0
+            return  
+        
+        unit_vel = self.velocity.normalize()
 
-        self.velocity = pygame.Vector2(new_vx, new_vy)
-        self.position = pygame.Vector2(new_x, new_y)
-        self.shape["center"] = self.position
+        # Update the velocity components
+        self.velocity -= decel * unit_vel * dt
+
+        # Update the position using the new velocity
+        self.position += self.velocity * dt
+
+        if self.speed > 0:
+            self.angular_velocity = self.speed / self.radius
 
     def update(self, dt):
         if not self.alive:
             return
-        self.apply_friction(c.BALL_FRICTION, dt)
+        if self.is_sliding():
+            self.apply_sliding_friction(c.SLIDING_FRICTION, dt)
+        else:
+            self.apply_rolling_friction(c.ROLLING_FRICTION, dt)
 
     def draw(self, surface):
-        if self.alive:
-            pygame.draw.circle(surface, self.color, (int(self.position.x), int(self.position.y)), int(self.radius))
+        if not self.alive:
+            return
+        if self.image:
+            # Snap image center directly to the converted pixel coordinates
+            rect = self.image.get_rect(center=(int(self.x), int(self.y)))
+            surface.blit(self.image, rect.topleft)
+        else:
+            # Clean fallback: uses our dynamic pixel property conversion getters
+            pygame.draw.circle(surface, self.color, (int(self.x), int(self.y)), self.radius_px)

@@ -23,7 +23,7 @@ def _resolve_pair(a, b, restitution):
     dx = b.x - a.x
     dy = b.y - a.y
     dist_sq = dx * dx + dy * dy
-    min_dist = a.radius + b.radius
+    min_dist = a.radius_px + b.radius_px
 
     if dist_sq >= min_dist * min_dist:
         return
