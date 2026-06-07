@@ -39,8 +39,8 @@ class CueStick:
         ux = math.cos(self.angle)
         uy = math.sin(self.angle)
 
-        start_x = bx - ux * (self.cue_ball.radius + self.offset)
-        start_y = by - uy * (self.cue_ball.radius + self.offset)
+        start_x = bx - ux * (self.cue_ball.radius_px + self.offset)
+        start_y = by - uy * (self.cue_ball.radius_px + self.offset)
         end_x   = start_x - ux * self.stick_length
         end_y   = start_y - uy * self.stick_length
 

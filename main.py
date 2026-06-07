@@ -99,6 +99,7 @@ def main():
     cue_stick = CueStick(cue_ball)
 
     running = True
+    show_trajectory = True
     while running:
         dt = clock.tick(c.FPS) / 1000.0
 
@@ -117,6 +118,8 @@ def main():
                     cue_stick.power_bar.decrease()
                 if event.key == pygame.K_r:
                     reset_game(balls, cue_stick, c.INITIAL_LAYOUT)
+                if event.key == pygame.K_t:
+                    show_trajectory = not show_trajectory
 
         mouse_pos = pygame.mouse.get_pos()
         cue_stick.update(mouse_pos)
@@ -157,9 +160,10 @@ def main():
             ball.draw(screen)
 
         ghost_visible = False
-        if cue_stick.active and cue_ball.alive:
-            ghost_visible = get_ghost_aim(cue_ball, balls, mouse_pos, cue_stick.direction) is not None
-            draw_ghost_indicator(screen, cue_ball, balls, mouse_pos, cue_stick.direction)
+        if cue_stick.active and cue_ball.alive and show_trajectory:
+            force = cue_stick.power_bar.force
+            ghost_visible = get_ghost_aim(cue_ball, balls, cue_stick.direction, force) is not None
+            draw_ghost_indicator(screen, cue_ball, balls, cue_stick.direction, force)
 
         cue_stick.draw(screen, show_power_aim=not ghost_visible)
 

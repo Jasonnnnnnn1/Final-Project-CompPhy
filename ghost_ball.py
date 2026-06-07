@@ -1,10 +1,3 @@
-"""Ghost-ball aiming aid (8 Ball Pool style).
-
-Shows where the cue ball must be at contact, the object-ball path through
-the pocket aim, and the cue-ball deflection after impact.
-Spacing uses 2 * BALL_RADIUS from constants.py.
-"""
-
 import math
 import pygame
 import constants as c
@@ -13,174 +6,194 @@ LINE_COLOR = (255, 255, 255)
 LINE_WIDTH = 2
 GHOST_RING_WIDTH = 2
 
+def calculate_kinematics(v0):
+    """Calculate exact stopping distance taking into account sliding and rolling friction phases."""
+    if v0 <= 0.001:
+        return 0.0, 0.0, 0.0
+        
+    a_slide = c.SLIDING_FRICTION * c.GRAVITY_MPS2
+    a_roll = c.ROLLING_FRICTION * c.GRAVITY_MPS2
+    
+    # Distance traveled during the sliding phase
+    d_slide = (12.0 * v0**2) / (49.0 * a_slide)
+    
+    # Velocity at the moment the ball begins pure rolling
+    v_roll = (5.0 / 7.0) * v0
+    
+    # Distance traveled during the pure rolling phase
+    d_roll = (v_roll**2) / (2.0 * a_roll)
+    
+    # Total stopping distance
+    d_stop = d_slide + d_roll
+    return d_stop, d_slide, v_roll
 
-def _ray_hits_ball(cue_pos, aim_dir, ball, contact_sep):
-    """Return distance along aim_dir to contact, or None if no hit."""
-    fc = pygame.Vector2(cue_pos.x - ball.x, cue_pos.y - ball.y)
-    b = 2.0 * fc.dot(aim_dir)
-    c_val = fc.length_squared() - contact_sep * contact_sep
-    disc = b * b - 4.0 * c_val
-    if disc < 0:
-        return None
-    sqrt_disc = math.sqrt(disc)
-    t = (-b - sqrt_disc) * 0.5
-    if t > 1.0:
-        return t
-    t = (-b + sqrt_disc) * 0.5
-    if t > 1.0:
-        return t
-    return None
-
-
-def find_first_object_ball(cue_ball, balls, aim_dir):
-    contact_sep = 2.0 * cue_ball.radius
-    cue_pos = pygame.Vector2(cue_ball.x, cue_ball.y)
-    best_ball = None
-    best_t = float("inf")
-
-    for ball in balls:
-        if not ball.alive or ball.is_cue:
-            continue
-        t = _ray_hits_ball(cue_pos, aim_dir, ball, contact_sep)
-        if t is not None and t < best_t:
-            best_t = t
-            best_ball = ball
-
-    return best_ball
-
-
-def compute_ghost_shot(cue_ball, object_ball, mouse_pos):
-    """Place ghost one ball diameter from object, on the cue side (contact point)."""
-    cue = pygame.Vector2(cue_ball.x, cue_ball.y)
-    obj = pygame.Vector2(object_ball.x, object_ball.y)
-    mouse = pygame.Vector2(mouse_pos)
-    sep = 2.0 * cue_ball.radius
-
-    approach = obj - cue
-    if approach.length_squared() < sep * sep:
-        return None
-
-    to_mouse = mouse - obj
-    # Mouse on the ball: treat as full-ball hit along cue approach
-    if to_mouse.length_squared() < sep * sep:
-        obj_dir = approach.normalize()
+def get_velocity_at_distance(v0, d, d_slide, v_roll):
+    """Calculate the remaining velocity of a ball after it has traveled distance d (in meters)."""
+    if d <= 0:
+        return v0
+        
+    a_slide = c.SLIDING_FRICTION * c.GRAVITY_MPS2
+    a_roll = c.ROLLING_FRICTION * c.GRAVITY_MPS2
+    
+    if d <= d_slide:
+        v_sq = v0**2 - 2 * a_slide * d
+        return math.sqrt(max(0, v_sq))
     else:
-        obj_dir = to_mouse.normalize()
-        # Object path is toward the mouse; ghost must stay on the cue side of object
-        if obj_dir.dot(approach) < 0:
-            obj_dir = -obj_dir
+        d_in_roll = d - d_slide
+        v_sq = v_roll**2 - 2 * a_roll * d_in_roll
+        return math.sqrt(max(0, v_sq))
 
-    ghost_pos = obj - obj_dir * sep
-
-    # Contact point must sit between cue and object, not inside the object
-    if (ghost_pos - obj).dot(approach) >= 0:
-        return None
-    if (ghost_pos - cue).length() >= (obj - cue).length():
-        return None
-
-    return {
-        "ghost_pos": ghost_pos,
-        "object_ball": object_ball,
-        "object_dir": obj_dir,
-    }
-
-
-def _cue_deflection_dir(cue_pos, ghost_pos, obj_dir):
-    """Tangent direction for cue ball after contact (equal-mass elastic)."""
-    perp = pygame.Vector2(-obj_dir.y, obj_dir.x)
-    if (cue_pos - ghost_pos).dot(perp) < 0:
-        perp = -perp
-    return perp.normalize()
-
-
-def _line_clear(cue_ball, ghost_pos, balls, ignore_ball):
-    start = pygame.Vector2(cue_ball.x, cue_ball.y)
-    path = ghost_pos - start
-    length = path.length()
-    if length < 1.0:
-        return True
-    path_n = path / length
-    min_pass = 2.0 * cue_ball.radius
-
-    for ball in balls:
-        if not ball.alive or ball.is_cue or ball is ignore_ball:
-            continue
-        center = pygame.Vector2(ball.x, ball.y)
-        rel = center - start
-        t = rel.dot(path_n)
-        if t < 0 or t > length:
-            continue
-        perp = (rel - path_n * t).length()
-        if perp < min_pass:
-            return False
-    return True
-
-
-def get_ghost_aim(cue_ball, balls, mouse_pos, aim_dir):
+def get_ghost_aim(cue_ball, balls, aim_dir, force):
     if aim_dir.length_squared() < 1e-6:
         return None
 
     aim_dir = aim_dir.normalize()
-    target = find_first_object_ball(cue_ball, balls, aim_dir)
-    if target is None:
-        return None
-
-    shot = compute_ghost_shot(cue_ball, target, mouse_pos)
-    if shot is None:
-        return None
-
     cue_pos = pygame.Vector2(cue_ball.x, cue_ball.y)
-    to_ghost = shot["ghost_pos"] - cue_pos
-    if to_ghost.length_squared() < 1.0:
-        return None
-    if to_ghost.normalize().dot(aim_dir) < 0.2:
-        return None
+    
+    # Calculate cue ball initial kinematics
+    v0_m = (force * c.CUE_CONTACT_TIME_S) / c.BALL_MASS
+    d_stop_m, d_slide_m, v_roll_m = calculate_kinematics(v0_m)
+    d_stop_px = d_stop_m * c.PX_PER_M
+    
+    best_t = float('inf')
+    best_ball = None
 
-    if not _line_clear(cue_ball, shot["ghost_pos"], balls, target):
-        return None
+    # Find the first ball we hit
+    for ball in balls:
+        if not ball.alive or ball.is_cue:
+            continue
+            
+        obj_pos = pygame.Vector2(ball.x, ball.y)
+        d_vec = cue_pos - obj_pos
+        
+        # Ray-circle intersection
+        b = 2.0 * d_vec.dot(aim_dir)
+        c_val = d_vec.length_squared() - (2.0 * cue_ball.radius_px) ** 2
+        disc = b * b - 4.0 * c_val
+        
+        if disc >= 0:
+            sqrt_disc = math.sqrt(disc)
+            t1 = (-b - sqrt_disc) * 0.5
+            t2 = (-b + sqrt_disc) * 0.5
+            
+            # Find smallest positive t
+            hit_t = None
+            if t1 > 1e-4:
+                hit_t = t1
+            elif t2 > 1e-4:
+                hit_t = t2
+                
+            if hit_t is not None and hit_t < best_t:
+                best_t = hit_t
+                best_ball = ball
 
-    shot["cue_pos"] = cue_pos
-    shot["cue_deflect_dir"] = _cue_deflection_dir(cue_pos, shot["ghost_pos"], shot["object_dir"])
-    return shot
+    # If no ball is hit, or the ball stops before hitting the target
+    if best_ball is None or best_t > d_stop_px:
+        # Provide a straight line to the stopping point
+        end_pos = cue_pos + aim_dir * d_stop_px
+        return {
+            "cue_pos": cue_pos,
+            "ghost_pos": None, # Indicates cue stops before hit
+            "cue_stop_pos": end_pos
+        }
 
+    ghost_pos = cue_pos + aim_dir * best_t
+    obj_pos = pygame.Vector2(best_ball.x, best_ball.y)
+    
+    # Calculate collision physics!
+    dist_to_ghost_m = best_t * c.M_PER_PX
+    v_impact_m = get_velocity_at_distance(v0_m, dist_to_ghost_m, d_slide_m, v_roll_m)
+    
+    # Normal vector from ghost ball to object ball
+    n = (obj_pos - ghost_pos)
+    if n.length_squared() < 1e-6:
+        n = aim_dir
+    else:
+        n = n.normalize()
 
-def draw_ghost_indicator(surface, cue_ball, balls, mouse_pos, aim_dir):
-    """8 Ball Pool style: white ring ghost + three solid white guide lines."""
-    shot = get_ghost_aim(cue_ball, balls, mouse_pos, aim_dir)
+    cos_theta = aim_dir.dot(n)
+    
+    # 1D Elastic Collision along the normal axis
+    # Equal mass, so dv = (1+e)*v_rel / 2
+    # Object ball is at rest, so v_rel = v_impact * cos_theta
+    dv = ((1.0 + c.BALL_RESTITUTION) / 2.0) * (v_impact_m * cos_theta)
+    
+    v_out_obj_m = dv
+    v_out_cue_n_m = (v_impact_m * cos_theta) - dv
+    
+    tangent_vec = aim_dir - n * cos_theta
+    if tangent_vec.length_squared() < 1e-6:
+        v_out_cue_t_m = 0
+        deflect_dir = None
+    else:
+        deflect_dir = tangent_vec.normalize()
+        v_out_cue_t_m = v_impact_m * tangent_vec.length()
+
+    v_out_cue_m = math.sqrt(v_out_cue_n_m**2 + v_out_cue_t_m**2)
+    
+    # Calculate stopping distances for both balls post-collision
+    obj_d_stop_m, _, _ = calculate_kinematics(v_out_obj_m)
+    cue_d_stop_m, _, _ = calculate_kinematics(v_out_cue_m)
+    
+    obj_path_len_px = obj_d_stop_m * c.PX_PER_M
+    cue_path_len_px = cue_d_stop_m * c.PX_PER_M
+
+    return {
+        "cue_pos": cue_pos,
+        "ghost_pos": ghost_pos,
+        "object_ball": best_ball,
+        "object_dir": n,
+        "cue_deflect_dir": deflect_dir,
+        "obj_path_len_px": obj_path_len_px,
+        "cue_path_len_px": cue_path_len_px
+    }
+
+def draw_ghost_indicator(surface, cue_ball, balls, aim_dir, force):
+    """8 Ball Pool style: white ring ghost + exactly scaled guide lines."""
+    shot = get_ghost_aim(cue_ball, balls, aim_dir, force)
     if shot is None:
         return
 
-    r = int(cue_ball.radius)
     cue_pos = shot["cue_pos"]
+    
+    # If the cue ball stops before hitting anything
+    if shot["ghost_pos"] is None:
+        stop_pos = shot["cue_stop_pos"]
+        cx, cy = int(cue_pos.x), int(cue_pos.y)
+        sx, sy = int(stop_pos.x), int(stop_pos.y)
+        pygame.draw.line(surface, LINE_COLOR, (cx, cy), (sx, sy), LINE_WIDTH)
+        return
+
+    r = int(cue_ball.radius_px)
     ghost_pos = shot["ghost_pos"]
-    obj = shot["object_ball"]
     obj_dir = shot["object_dir"]
     deflect_dir = shot["cue_deflect_dir"]
+    
+    obj_len = shot["obj_path_len_px"]
+    cue_len = shot["cue_path_len_px"]
 
     cx, cy = int(cue_pos.x), int(cue_pos.y)
     gx, gy = int(ghost_pos.x), int(ghost_pos.y)
-    ox, oy = int(obj.x), int(obj.y)
 
-    obj_path_len = min(320, c.SCREEN_TABLE_W * 0.4)
-    deflect_len = min(140, obj_path_len * 0.45)
-
-    obj_end = ghost_pos + obj_dir * (obj_path_len + 2.0 * r)
-    deflect_end = ghost_pos + deflect_dir * deflect_len
-
+    obj_end = ghost_pos + obj_dir * (obj_len + 2.0 * r)
+    
     # 1) Cue ball → ghost ball
     pygame.draw.line(surface, LINE_COLOR, (cx, cy), (gx, gy), LINE_WIDTH)
 
-    # 2) Ghost → through object ball → aim direction
-    pygame.draw.line(
-        surface, LINE_COLOR,
-        (gx, gy), (int(obj_end.x), int(obj_end.y)), LINE_WIDTH
-    )
+    # 2) Ghost → through object ball
+    if obj_len > 0:
+        pygame.draw.line(
+            surface, LINE_COLOR,
+            (gx, gy), (int(obj_end.x), int(obj_end.y)), LINE_WIDTH
+        )
 
-    # 3) Cue deflection (tangent from ghost ball)
-    pygame.draw.line(
-        surface, LINE_COLOR,
-        (gx, gy), (int(deflect_end.x), int(deflect_end.y)), LINE_WIDTH
-    )
+    # 3) Cue deflection
+    if deflect_dir is not None and cue_len > 0:
+        deflect_end = ghost_pos + deflect_dir * cue_len
+        pygame.draw.line(
+            surface, LINE_COLOR,
+            (gx, gy), (int(deflect_end.x), int(deflect_end.y)), LINE_WIDTH
+        )
 
     # Ghost ball ring (outline only)
     pygame.draw.circle(surface, LINE_COLOR, (gx, gy), r, GHOST_RING_WIDTH)
