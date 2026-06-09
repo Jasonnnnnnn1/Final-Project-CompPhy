@@ -58,16 +58,21 @@ BALL_RESTITUTION = 0.95  # Coefficient of restitution for ball-ball collision
 # Gravity in SI units
 GRAVITY_MPS2 = 9.81
 
-# Backwards-compatible pixel-space gravity used by older code paths
-GRAVITY = GRAVITY_MPS2 * PX_PER_M
+
+'''Drawing'''
+
+# Make the value higher for larger hitbox radius, make it smaller for a smaller hitbox radius
+# Basically this value will be multiplied by the pocket length, normally to get radius is length / 2
+# We can modify this by changing the values to bigger or smaller
+HITBOX_STRICTNESS = 0.55
 
 def generate_8ball_layout():
-    # 1. Calculate the exact vertical center of the playable table surface
+    # Calculate the exact vertical center of the playable table surface
     play_top = MARGIN + RAIL_W
     play_bottom = (MARGIN + SCREEN_TABLE_H) - RAIL_W
     center_y = play_top + (play_bottom - play_top) // 2
     
-    # 2. Calculate spots (Apex at 75%, Cue at 25%)
+    # Calculate spots: 8 ball at 75%, Cue ball at 25%
     play_left = MARGIN + RAIL_W
     play_right = (MARGIN + SCREEN_TABLE_W) - RAIL_W
     playable_length = play_right - play_left
@@ -75,7 +80,7 @@ def generate_8ball_layout():
     foot_spot_x = play_left + int(playable_length * 0.75)
     head_spot_x = play_left + int(playable_length * 0.25)
 
-    # 3. Geometry variables
+    # Geometry variables
     diameter = BALL_RADIUS * 2
     row_spacing_x = int(diameter * 0.866) 
     row_step_y = BALL_RADIUS 
@@ -89,12 +94,12 @@ def generate_8ball_layout():
     rows_structure = [1, 2, 3, 4, 5]
     
     # Track which pool ball number we are on (1 to 15)
-    # The 8-ball needs to be hardcoded to the middle, so we pull numbers from a pre-sorted order
-    # Regulation 8-ball setup: 8 in center, corners must be one solid (1-7) and one stripe (9-15)
+    # The 8-ball needs to be hardcoded in the 5th position of the array
+    # while ball number 1 needs to be on top and the rest can be random
     ball_order = [
         1,       # Row 1
         2, 9,    # Row 2
-        3, 8, 10, # Row 3 (8-ball is perfectly in the middle)
+        3, 8, 10, # Row 3 
         4, 11, 5, 12, # Row 4
         6, 13, 14, 7, 15 # Row 5
     ]
@@ -115,13 +120,13 @@ def generate_8ball_layout():
             layout.append({
                 "x": row_x,
                 "y": ball_y,
-                "color": (20, 20, 20) if ball_number == 8 else (200, 50, 50), # Fallback color
+                "color": (20, 20, 20) if ball_number == 8 else (200, 50, 50), # any other color
                 "is_black": ball_number == 8,
-                "img": f"Assets/ball_{ball_number}.png" # Generates ball_1.png up to ball_15.png
+                "img": f"Assets/ball_{ball_number}.png" # Generates ball_1.png to ball_15.png sprites
             })
             order_index += 1
-
     return layout
 
 # Initialize layout
 INITIAL_LAYOUT = generate_8ball_layout()
+print(INITIAL_LAYOUT)
