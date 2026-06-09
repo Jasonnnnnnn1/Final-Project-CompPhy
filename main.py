@@ -6,6 +6,7 @@ from cue_stick import CueStick
 from collisions import resolve_ball_collisions
 from ghost_ball import draw_ghost_indicator, get_ghost_aim
 
+# Helper function to create ball objects by taking data from the layout in constants.py
 def create_balls(layout):
     balls = []
     for spec in layout:
@@ -94,6 +95,7 @@ def main():
 
     table = Table()
     balls = create_balls(c.INITIAL_LAYOUT)
+    # print(balls)
     cue_ball = balls[0]
     black_ball = balls[5]
     cue_stick = CueStick(cue_ball)
