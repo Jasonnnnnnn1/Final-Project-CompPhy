@@ -91,7 +91,7 @@ def resolve_wall_collisions(balls, table):
 def main():
     pygame.init()
     screen = pygame.display.set_mode((c.SCREEN_LENGTH, c.SCREEN_HEIGHT))
-    pygame.display.set_caption("BL FOR LIFE")
+    pygame.display.set_caption("мен бильярдты жақсы көремін")
     clock = pygame.time.Clock()
 
     table = Table()
@@ -137,10 +137,11 @@ def main():
 
         table.check_pockets(balls)
 
-        if frame_count % 10 == 0:
-            total_ke = sum(0.5 * ball.mass * (ball.speed ** 2) for ball in balls if ball.alive)
-            if total_ke > 0.0001:
-                print(f"{total_ke:.6f}")
+        # this is just for printing the total kinetic energy for ghost ball stuff
+        # if frame_count % 10 == 0:
+        #     total_ke = sum(0.5 * ball.mass * (ball.speed ** 2) for ball in balls if ball.alive)
+        #     if total_ke > 0.0001:
+        #         print(f"{total_ke:.6f}")
 
         all_stopped = all(not b.alive or b.speed < 0.001 for b in balls)
         if all_stopped:
