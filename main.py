@@ -103,8 +103,10 @@ def main():
 
     running = True
     show_trajectory = True
+    frame_count = 0
     while running:
         dt = clock.tick(c.FPS) / 1000.0
+        frame_count += 1
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -134,6 +136,11 @@ def main():
         resolve_wall_collisions(balls, table)
 
         table.check_pockets(balls)
+
+        if frame_count % 10 == 0:
+            total_ke = sum(0.5 * ball.mass * (ball.speed ** 2) for ball in balls if ball.alive)
+            if total_ke > 0.0001:
+                print(f"{total_ke:.6f}")
 
         all_stopped = all(not b.alive or b.speed < 0.001 for b in balls)
         if all_stopped:

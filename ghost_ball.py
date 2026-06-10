@@ -14,13 +14,19 @@ def calculate_kinematics(v0):
     a_slide = c.SLIDING_FRICTION * c.GRAVITY_MPS2
     a_roll = c.ROLLING_FRICTION * c.GRAVITY_MPS2
     
+    # To calculate the stopping distance, we run the initial velocity through two friction states.
+    # First, the Sliding Phase decelerates the ball quickly because it's skidding across the felt.
     # Distance traveled during the sliding phase
+    # EQUATIONS: d_slide = (12 * v0^2) / (49 * u_slide * g)
     d_slide = (12.0 * v0**2) / (49.0 * a_slide)
     
     # Velocity at the moment the ball begins pure rolling
+    # EQUATIONS: v_roll = (5/7) * v0
     v_roll = (5.0 / 7.0) * v0
     
+    # Once the ball stops skidding, it enters the Pure Rolling phase, where friction is much lower, letting it glide!
     # Distance traveled during the pure rolling phase
+    # EQUATIONS: d_roll = (v_roll^2) / (2 * u_roll * g)
     d_roll = (v_roll**2) / (2.0 * a_roll)
     
     # Total stopping distance
@@ -36,10 +42,12 @@ def get_velocity_at_distance(v0, d, d_slide, v_roll):
     a_roll = c.ROLLING_FRICTION * c.GRAVITY_MPS2
     
     if d <= d_slide:
+        # EQUATIONS: V_final^2 = V_initial^2 - 2 * a * d
         v_sq = v0**2 - 2 * a_slide * d
         return math.sqrt(max(0, v_sq))
     else:
         d_in_roll = d - d_slide
+        # EQUATIONS: V_final^2 = V_initial^2 - 2 * a * d
         v_sq = v_roll**2 - 2 * a_roll * d_in_roll
         return math.sqrt(max(0, v_sq))
 
@@ -66,12 +74,20 @@ def get_ghost_aim(cue_ball, balls, aim_dir, force):
         obj_pos = pygame.Vector2(ball.x, ball.y)
         d_vec = cue_pos - obj_pos
         
-        # Ray-circle intersection
+        # Here is our Continuous Collision Detection. We cast a Ray and use the 
+        # Quadratic Formula to find the exact pixel where it intersects a boundary circle drawn around the target ball!
+        # Ray-circle intersection quadratic formula (at^2 + bt + c = 0)
+        # EQUATIONS: a = (V dot V) = 1 (since aim_dir is normalized)
+        # EQUATIONS: b = 2 * (D dot V)
         b = 2.0 * d_vec.dot(aim_dir)
+        # EQUATIONS: c = (D dot D) - (2R)^2
         c_val = d_vec.length_squared() - (2.0 * cue_ball.radius_px) ** 2
+        
+        # EQUATIONS: Discriminant = b^2 - 4ac
         disc = b * b - 4.0 * c_val
         
         if disc >= 0:
+            # EQUATIONS: t = (-b +/- sqrt(disc)) / 2a
             sqrt_disc = math.sqrt(disc)
             t1 = (-b - sqrt_disc) * 0.5
             t2 = (-b + sqrt_disc) * 0.5
@@ -113,14 +129,20 @@ def get_ghost_aim(cue_ball, balls, aim_dir, force):
 
     cos_theta = aim_dir.dot(n)
     
+    # We calculate a 1D elastic collision along the Normal Vector to find how much energy is transferred to the object ball.
     # 1D Elastic Collision along the normal axis
     # Equal mass, so dv = (1+e)*v_rel / 2
     # Object ball is at rest, so v_rel = v_impact * cos_theta
+    # EQUATIONS: dV = ((1 + e) / 2) * (V_impact * cos_theta)
     dv = ((1.0 + c.BALL_RESTITUTION) / 2.0) * (v_impact_m * cos_theta)
     
     v_out_obj_m = dv
     v_out_cue_n_m = (v_impact_m * cos_theta) - dv
     
+    # Because elastic collisions always separate at 90 degrees, we find the Tangent Vector
+    # by subtracting the Normal vector from the original aim direction. The cue ball deflects exactly down this tangent line!
+    # Calculate Tangent Deflection
+    # EQUATIONS: Tangent_Vector = Aim_Dir - (Normal * cos_theta)
     tangent_vec = aim_dir - n * cos_theta
     if tangent_vec.length_squared() < 1e-6:
         v_out_cue_t_m = 0
