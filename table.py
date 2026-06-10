@@ -5,9 +5,9 @@ class Table:
     def __init__(self):
         # Outer boundary of the whole table (includes rails)
         self.left = c.MARGIN
-        self.right = c.MARGIN + c.SCREEN_TABLE_W
+        self.right = c.MARGIN + c.SCREEN_TABLE_LENGTH
         self.top = c.MARGIN
-        self.bottom = c.MARGIN + c.SCREEN_TABLE_H
+        self.bottom = c.MARGIN + c.SCREEN_TABLE_HEIGHT
 
         # Inner edge of the playing surface (inside the rails)
         self.play_left = self.left + c.RAIL_W
@@ -25,24 +25,24 @@ class Table:
         """Pocket rects aligned to the play-area lip; black holes sit in the rails."""
         defs = []
         # Pre-compute half-lengths so we can center pockets around their mouth points
-        half_s = c.SIDE_POCKET_LENGTH // 2
-        half_c = c.CORNER_POCKET_LENGTH // 2
+        half_side_pocket = c.SIDE_POCKET_LENGTH // 2
+        half_corner_pocket = c.CORNER_POCKET_LENGTH // 2
         # Side pockets are always centered horizontally on the screen
-        cx = c.SCREEN_W // 2
+        cx = c.SCREEN_LENGTH // 2
 
         # Side pockets: mouth flush with play_top / play_bottom, black extends into rail
         defs.append({
-            "rect": pygame.Rect(cx - half_s, self.play_top - c.SIDE_POCKET_LENGTH,
+            "rect": pygame.Rect(cx - half_side_pocket, self.play_top - c.SIDE_POCKET_LENGTH,
                                 c.SIDE_POCKET_LENGTH, c.SIDE_POCKET_LENGTH),
-            "center": (cx, self.play_top - half_s),
+            "center": (cx, self.play_top - half_side_pocket),
             "length": c.SIDE_POCKET_LENGTH,
             "angle": 0,
             "is_corner": False
         })
         defs.append({
-            "rect": pygame.Rect(cx - half_s, self.play_bottom,
+            "rect": pygame.Rect(cx - half_side_pocket, self.play_bottom,
                                 c.SIDE_POCKET_LENGTH, c.SIDE_POCKET_LENGTH),
-            "center": (cx, self.play_bottom + half_s),
+            "center": (cx, self.play_bottom + half_side_pocket),
             "length": c.SIDE_POCKET_LENGTH,
             "angle": 0,
             "is_corner": False
@@ -60,8 +60,8 @@ class Table:
         for mouth_x, mouth_y, dx, dy, angle in corners:
             # Shift the center slightly inward toward the playable table surface
             # to make sure the square completely covers the cushion corner apex.
-            center_x = mouth_x + (dx * (half_c * 0.06))  
-            center_y = mouth_y + (dy * (half_c * 0.06))  
+            center_x = mouth_x + (dx * (half_corner_pocket * 0.06))  
+            center_y = mouth_y + (dy * (half_corner_pocket * 0.06))  
 
             # Expand detection size slightly to catch fast moving balls safely
             detection_size = int(c.CORNER_POCKET_LENGTH * 1.3)
@@ -82,7 +82,7 @@ class Table:
     # Open the cushion boundaries to make the ball hit the pocket openings
     def is_top_cushion_open(self, ball):
         # Check if ball is near the side pocket gap at the center of the table
-        if abs(ball.x - c.SCREEN_W // 2) <= c.SIDE_POCKET_LENGTH // 2:
+        if abs(ball.x - c.SCREEN_LENGTH // 2) <= c.SIDE_POCKET_LENGTH // 2:
             return True
         # Check if ball is near the top-left corner pocket gap
         if ball.x < self.play_left + (c.CORNER_POCKET_LENGTH * 0.5):
@@ -150,7 +150,7 @@ class Table:
 
     def draw(self, surface):
         # 1. Base wood rail border
-        table_rect = pygame.Rect(self.left, self.top, c.SCREEN_TABLE_W, c.SCREEN_TABLE_H)
+        table_rect = pygame.Rect(self.left, self.top, c.SCREEN_TABLE_LENGTH, c.SCREEN_TABLE_HEIGHT)
         pygame.draw.rect(surface, (60, 40, 20), table_rect)
         
         # 2. Main green playing cloth field

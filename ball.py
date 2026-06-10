@@ -3,10 +3,10 @@ import constants as c
 
 class Ball:
     def __init__(self, x_px, y_px, radius_m, mass, color, is_cue=False, is_black=False, image_path=None):
-        # 1. Initialize the internal vector position FIRST (converts incoming pixels to meters)
+        # 1. Initialize the internal vector position FIRST, this is in meters
         self.position = pygame.Vector2(x_px * c.M_PER_PX, y_px * c.M_PER_PX)
         
-        # 2. Assign standard physics constants (all calculations run natively in meters)
+        # 2. Assign standard physics constants (all calculations will run on SI units, then later converted to pixels)
         self.radius = radius_m            # Physics radius (meters)
         self.mass = mass
         self.color = color
@@ -28,13 +28,11 @@ class Ball:
     # --- SYNCHRONIZED PIXEL PROPERTIES ---
     @property
     def radius_px(self):
-        """Dynamic converter mapping radius meters to current runtime screen scale pixels."""
         # EQUATIONS: pixels = meters * (pixels / meter)
         return int(self.radius * c.PX_PER_M)
 
     @property
     def x(self):
-        """Exposes physics position x in pixel coordinates for drawing and grid mapping."""
         # EQUATIONS: x_px = x_m * (pixels / meter)
         return self.position.x * c.PX_PER_M
 
@@ -45,7 +43,6 @@ class Ball:
 
     @property
     def y(self):
-        """Exposes physics position y in pixel coordinates for drawing and grid mapping."""
         # EQUATIONS: y_px = y_m * (pixels / meter)
         return self.position.y * c.PX_PER_M
 

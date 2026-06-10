@@ -51,13 +51,14 @@ def resolve_wall_collisions(balls, table):
     cushion_left   = table.left + c.RAIL_W
     cushion_right  = table.right - c.RAIL_W
 
+    # Checking if the ball is actually hitting the cushions
     for ball in balls:
         if not ball.alive:
             continue
 
         radius = ball.radius_px
 
-        # --- TOP CUSHION ---
+        # TOP CUSHION
         if ball.y - radius < cushion_top:
             if not table.is_top_cushion_open(ball):
                 # Ensure the ball is heading TOWARDS the cushion before bouncing
@@ -65,21 +66,21 @@ def resolve_wall_collisions(balls, table):
                     ball.y = cushion_top + radius
                     ball.vy *= -c.CUSHION_RESTITUTION
 
-        # --- BOTTOM CUSHION ---
+        # BOTTOM CUSHION 
         elif ball.y + radius > cushion_bottom:
             if not table.is_bottom_cushion_open(ball):
                 if ball.vy > 0:
                     ball.y = cushion_bottom - radius
                     ball.vy *= -c.CUSHION_RESTITUTION
 
-        # --- LEFT CUSHION ---
+        # LEFT CUSHION
         if ball.x - radius < cushion_left:
             if not table.is_left_cushion_open(ball):
                 if ball.vx < 0:
                     ball.x = cushion_left + radius
                     ball.vx *= -c.CUSHION_RESTITUTION
 
-        # --- RIGHT CUSHION ---
+        # RIGHT CUSHION 
         elif ball.x + radius > cushion_right:
             if not table.is_right_cushion_open(ball):
                 if ball.vx > 0:
@@ -89,7 +90,7 @@ def resolve_wall_collisions(balls, table):
 
 def main():
     pygame.init()
-    screen = pygame.display.set_mode((c.SCREEN_W, c.SCREEN_H))
+    screen = pygame.display.set_mode((c.SCREEN_LENGTH, c.SCREEN_HEIGHT))
     pygame.display.set_caption("BL FOR LIFE")
     clock = pygame.time.Clock()
 
@@ -170,7 +171,7 @@ def main():
         cue_stick.draw(screen, show_power_aim=not ghost_visible)
 
         bar_width = 40
-        bar_height = c.SCREEN_TABLE_H - 40
+        bar_height = c.SCREEN_TABLE_HEIGHT - 40
         bar_x = (c.MARGIN - bar_width) // 2
         bar_y = c.MARGIN + 20
         cue_stick.power_bar.draw(screen, x=bar_x, y=bar_y, width=bar_width, height=bar_height)
